@@ -1,0 +1,66 @@
+version: "3.3"
+
+services:
+
+  # Comment out everything below this point if you are using an external Postgres database
+  db:
+    container_name: supabase-db
+    image: supabase/postgres:15.1.0.117
+    healthcheck:
+      test: pg_isready -U postgres -h localhost
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal # prevents Realtime polling queries from appearing in logs
+    restart: unless-stopped
+    ports:
+      # Pass down internal port because it's set dynamically by other services
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    volumes:
+      - ./db/init/data.sql:/docker-entrypoint-initdb.d/init-scripts/97-data.sql:Z
+      - ./db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      # Must be superuser to create event trigger
+      - ./db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      # Must be superuser to alter reserved role
+      - ./db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      # Initialize the database settings with JWT_SECRET and JWT_EXP
+      - ./db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      # PGDATA directory is persisted between restarts
+      - ./db/data:/var/lib/postgresql/data:Z
+      # Changes required for Analytics support
+      - ./db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+
+#  reactjs-srv:
+#    image: bayesimpact/react-base:latest
+#    command: /bin/sh -c "npm install && npm start"
+#    volumes:
+#      -  ./reactjs-srv/bin:/usr/app
+#    ports:
+#      - 80:3000
+#
+  api:
+    image: node:latest
+    volumes:
+      - ./api/bin:/app
+    command: /bin/sh -c "cd /app && npm install && node /app/server.js"
+    ports:
+      - 81:8000
+      - 443:443
+    environment:
+      SUPABASE_URL: http://${POSTGRES_HOST}:${POSTGRES_PORT}
+      SUPABASE_KEY: ${ANON_KEY}
